@@ -22,15 +22,18 @@ class AddressBook(UserDict):
         result = []
         for record in self.data.values():
             name_match = search_criteria.get('name') is None or record.name.value == search_criteria['name']
-            phones_match = search_criteria.get('phones') is None or search_criteria['phones'] in record.phones.value
+            phones_match = search_criteria.get('phones') is None or any(
+                phone.getter_value == search_criteria['phones'] for phone in record.phones)
             if name_match and phones_match:
                 result.append(record)
         return result
 
     def validate_record(self, record):
-        valid_phone = all(phone.validate(phone.value) for phone in record.phones)
-        valid_birthday = record.birthday is None or record.birthday.validate(record.birthday.value)
-        return valid_phone and valid_birthday
+        valid_phones = all(isinstance(phone, Phone) and phone.validate(phone.value) for phone in record.phones)
+        valid_name = isinstance(record.name, Name)
+        valid_birthday = isinstance(record.birthday, Birthday) and record.birthday.validate(record.birthday.value)
+
+        return valid_phones and valid_name and valid_birthday
 
     def __iter__(self):
         self.index = 0
@@ -106,21 +109,20 @@ class Record:
         return f"Name: {self.name.value}, Phones: {phones_str}"
 
 class Field:
-    def __init__(self, value=None):
-        self.value = value
+    def __init__(self, value):
+        self.__value = None
+        self.value=value
 
     def validate(self, new_value):
         return True
     @property
-    def getter_value(self):
-        return self.value
+    def value(self):
+        return self.__value
 
-    @getter_value.setter
-    def getter_value(self, new_value):
-        if self.validate(new_value):
-            self.value = new_value
-            return True
-        return False
+    @value.setter
+    def value(self, new_value):
+        self.__value = new_value
+
 
     def __str__(self):
         return str(self.value)
@@ -129,17 +131,24 @@ class Field:
 class Phone(Field):
     def __init__(self, value=None):
         super().__init__(value)
-        if self.value:
-            self.validate(self.value)
+
+    @Field.value.setter
+    def value(self, new_value):
+        if self.validate(new_value):
+            Field.value.fset(self, new_value)
+        else:
+            print(f'Номер телефону {new_value} не можна призначити, оскільки він не валідний')
 
     def validate(self, number):
+        if number is None:
+            return False
         try:
             phone_format = r'\+380\d{9}'
             if not re.match(phone_format, number):
-                raise ValueError('Неправильний формат телефону. Має бути +380_________')
+                return False
             return True
-        except ValueError as e:
-            print(f"Помилка при валідації номера: {e}")
+        except ValueError:
+            return False
 
 
 class Name(Field):
@@ -149,18 +158,21 @@ class Name(Field):
 class Birthday(Field):
     def __init__(self, value=None):
         super().__init__(value)
-        if self.value:
-            self.validate(self.value)
+
+    @Field.value.setter
+    def value(self, new_value):
+        if self.validate(new_value):
+            Field.value.fset(self, new_value)
+        else:
+            print(f'Дату дня народження {new_value} не можна призначити, оскільки вона не валідна')
 
     def validate(self, new_value):
         try:
             datetime.strptime(new_value, '%d.%m.%Y').date()
             return True
         except ValueError:
-            print('Неправильний формат дати. Має бути __.__.____')
             return False
         except TypeError:
-            print('Помилка при обробці дати. Неправильний формат дати. Має бути __.__.____')
             return False
 
 
@@ -197,17 +209,22 @@ else 'Телефони:' + ', '.join([f'{phone}' for phone in record.phones]))
 
     # Створення об'єкту класу Birthday
     birthday = Birthday('01.10.2023')
-    # Присвоєння нової дати народження
+    # Присвоєння валідної дати народження
     birthday.getter_value = '11.10.2022'
-    print(f'Присвоєно нову дату народження - {birthday.getter_value}')
+    print(f'Присвоєно нову дату народження через getter_value: {birthday.getter_value}')
+    # Присвоєння не валідної дати народження з помилкою у форматі
+    # birthday.getter_value = '01/10.2022'
     # Створення об'єкту класу Birthday з помилкою у форматі дати
-    birthday1 = Birthday('01/10.2022')
+    birthday1 = Birthday('01//10.2022')
+
 
     # Створення об'єкту класу Phone
     phone = Phone('+380503456787')
-    # Присвоєння нового телефону
-    phone.getter_value = '+380603456787'
-    print(f'Присвоєно нового телефону {phone.getter_value}')
+    # Присвоєння нового телефону через getter_value з помилкою у форматі
+    phone.getter_value = '++380603456787'
+    # Присвоєння валідного номера
+    phone.getter_value = '+380123456787'
+    print(f'Присвоєння валідного номеру телефону через getter_value: {phone.getter_value}')
     # Створення об'єкту класу Phone з неправильним форматом
     phone1 = Phone("++380503456787")
 
@@ -243,5 +260,4 @@ else 'Телефони:' + ', '.join([f'{phone}' for phone in record.phones]))
             f"Name: {record.name.value}, "
               f"Phones: {', '.join((phone.value) for phone in record.phones)}, "
               f"Birthday: {record.birthday.value}")
-
 
